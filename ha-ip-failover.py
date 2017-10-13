@@ -1,25 +1,25 @@
 #!/usr/bin/env python2
-# Copyright (C) 2017 Remy van Elst. 
-# Author: Remy van Elst, https://raymii.org
-# 
-# This program is free software; you can redistribute it and/or modify it 
-# under the terms of the GNU General Public License as published by the 
-# Free Software Foundation; either version 2 of the License, or (at your 
+# Copyright (C) 2017 CloudVPS.
+# Author: Remy van Elst, https://www.cloudvps.com
+#
+# This program is free software; you can redistribute it and/or modify it
+# under the terms of the GNU General Public License as published by the
+# Free Software Foundation; either version 2 of the License, or (at your
 # option) any later version.
-# 
-# This program is distributed in the hope that it will be useful, but 
-# WITHOUT ANY WARRANTY; without even the implied warranty of 
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU 
+#
+# This program is distributed in the hope that it will be useful, but
+# WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
 # General Public License for more details.
-# 
-# You should have received a copy of the GNU General Public License along 
-# with this program; if not, write to the Free Software Foundation, Inc., 
+#
+# You should have received a copy of the GNU General Public License along
+# with this program; if not, write to the Free Software Foundation, Inc.,
 # 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
 #
 
-## Script to change the floating IP during a 
+## Script to change the floating IP during a
 ## keepalived state transision on the CloudVPS
-## OpenStack 2 Cloud. 
+## OpenStack 2 Cloud.
 
 import argparse
 import subprocess
@@ -56,16 +56,16 @@ def load_config(config_file):
       "83.96.236.198": "192.168.0.7",
       "83.96.236.143": "192.168.0.7",
       "83.96.236.84": "192.168.0.6"
-    } 
+    }
   }
   """
   try:
     config_data = json.loads(open(config_file).read())
     # Log everything except for password.
-    syslog.debug("""Username: {0}; 
+    syslog.debug("""Username: {0};
       Tenant ID: {1},
       Floating IP's: {2}""".format(
-                              config_data["username"], 
+                              config_data["username"],
                               config_data["tenant_id"],
                               config_data["floatingips"]))
     return config_data
@@ -97,7 +97,7 @@ def main():
 
   if(len(sys.argv) == 1):
     usage()
-  
+
   if sys.argv[1] == "VERIFY":
     syslog.debug("Starting auth verify")
     verify_config(config_data, instance_uuid, keystone_url)
@@ -115,7 +115,7 @@ def main():
 
   # Only do an action if we're transisitoning to master state
   # if anything else, we don't want to disassociate floating IP's
-  # since the neutron api doesn't allow to disassociate a floating ip 
+  # since the neutron api doesn't allow to disassociate a floating ip
   # from a specific port. Just fire and forget disassociate.
   if keepalived_state != "MASTER":
     print("Not transitioning to master, no action.")
@@ -124,48 +124,48 @@ def main():
 
   ## Get the auth token and service catalog from keystone
   try:
-    auth_request = get_auth_request(config_data["username"], 
-                                    config_data["password"], 
-                                    config_data["tenant_id"], 
+    auth_request = get_auth_request(config_data["username"],
+                                    config_data["password"],
+                                    config_data["tenant_id"],
                                     keystone_url)
   except Exception as e:
-    syslog.error("""ERROR: token creation failed: ({})""".format(e)) 
-    errlog.error("""ERROR: token creation failed: ({})""".format(e)) 
+    syslog.error("""ERROR: token creation failed: ({})""".format(e))
+    errlog.error("""ERROR: token creation failed: ({})""".format(e))
     sys.exit(1)
   auth_token = auth_request.headers["X-Subject-Token"]
   syslog.debug(auth_token)
 
   ## get the compute and neutron api endpoint URL's from the catalogs
-  compute_url = get_endpoint_url_from_auth_request(type="compute", 
-                                                   interface="public", 
-                                                   tenant_id=config_data["tenant_id"], 
+  compute_url = get_endpoint_url_from_auth_request(type="compute",
+                                                   interface="public",
+                                                   tenant_id=config_data["tenant_id"],
                                                    auth_request=auth_request)
-  network_url = get_endpoint_url_from_auth_request(type="network", 
-                                                  interface="public", 
-                                                  tenant_id=config_data["tenant_id"], 
+  network_url = get_endpoint_url_from_auth_request(type="network",
+                                                  interface="public",
+                                                  tenant_id=config_data["tenant_id"],
                                                   auth_request=auth_request)
 
-  # Get all the ports from neutron for this tenant. 
+  # Get all the ports from neutron for this tenant.
   ## Neutron uses the tenant_id from the auth_token.
-  ports_data = get_resource(auth_token, network_url, 
+  ports_data = get_resource(auth_token, network_url,
                             "/v2.0/ports?fields=id&fields=device_id&fields=fixed_ips")
   instance_ports = get_network_ports_for_this_instance(instance_uuid, ports_data)
 
   ## get all the floating IP's for this tenant.
   floatingip_data = get_resource(auth_token, network_url, "/v2.0/floatingips")
 
-  ## Loop over the floating IP's in the config, 
-  ## disassociate them, check if they are unassigned and then associate them to 
+  ## Loop over the floating IP's in the config,
+  ## disassociate them, check if they are unassigned and then associate them to
   ## the port for the internal IP.
-  for floatingip, internal_ip in config_data["floatingips"].iteritems(): 
-    floatingip_uuid = get_floatingip_uuid(floatingip, 
-                                          floatingip_data, 
+  for floatingip, internal_ip in config_data["floatingips"].iteritems():
+    floatingip_uuid = get_floatingip_uuid(floatingip,
+                                          floatingip_data,
                                           auth_token)["id"]
     internal_port_uuid = instance_ports[internal_ip]
     deassign_floatingip(floatingip_uuid, network_url, auth_token)
     deassign_floatingip(floatingip_uuid, network_url, auth_token)
 
-    assign_floatingip(floatingip_uuid, internal_port_uuid, 
+    assign_floatingip(floatingip_uuid, internal_port_uuid,
                       network_url, auth_token)
 
 
@@ -181,20 +181,20 @@ def assign_floatingip(floatingip_uuid, port_uuid, network_url, auth_token):
   floatingip_url = network_url + "v2.0/floatingips/" + floatingip_uuid
   floatingip_request_data = {"floatingip": {"port_id": port_uuid }}
   try:
-    floatingip_request = requests.put(floatingip_url, 
-                                      json=floatingip_request_data, 
+    floatingip_request = requests.put(floatingip_url,
+                                      json=floatingip_request_data,
                                       headers=headers, timeout=15)
   except Exception as e:
     syslog.error("Request: {0}".format(e))
     errlog.error("Request: {0}".format(e))
     try:
-      floatingip_request = requests.put(floatingip_url, 
-                                      json=floatingip_request_data, 
+      floatingip_request = requests.put(floatingip_url,
+                                      json=floatingip_request_data,
                                       headers=headers, timeout=15)
     except Exception as e2:
       syslog.error("Request retry: {0}".format(e))
       errlog.error("Request retry: {0}".format(e))
-      sys.exit(1)  
+      sys.exit(1)
 
   if floatingip_request.ok:
     syslog.debug("Request output: {0} {1} {2} {3}".format(
@@ -228,7 +228,7 @@ def get_floatingip_uuid(floatingip, floatingip_data, auth_token):
   syslog.debug("Get UUID for floating IP {0}.".format(floatingip))
   for floatingips in floatingip_data["floatingips"]:
     if floatingips["floating_ip_address"] == floatingip:
-      syslog.debug("Floating IP {0} had UUID {1}.".format(floatingip, 
+      syslog.debug("Floating IP {0} had UUID {1}.".format(floatingip,
                                                    floatingips["id"]))
       return floatingips
 
@@ -239,9 +239,9 @@ def get_network_ports_for_this_instance(instance_uuid, ports_data):
     if ports["device_id"] == instance_uuid:
       port_ids[ports["fixed_ips"][0]["ip_address"]] = ports["id"]
       syslog.debug("Instance {0} has port {1} with IP {2}.".format(
-                                          instance_uuid, 
-                                          ports["id"], 
-                                          ports["fixed_ips"][0]["ip_address"]))     
+                                          instance_uuid,
+                                          ports["id"],
+                                          ports["fixed_ips"][0]["ip_address"]))
   return port_ids
 
 
@@ -264,7 +264,7 @@ def get_resource(auth_token, endpoint_url, resource_url):
                                             resource_request.request.url,
                                             resource_request.request.body))
     return(resource_request.json())
-  else: 
+  else:
     syslog.error("Request output: {0} {1} {2} {3}".format(
                                             resource_request.status_code,
                                             resource_request.request.method,
@@ -278,7 +278,7 @@ def get_resource(auth_token, endpoint_url, resource_url):
     resource_request.raise_for_status()
 
 
-def get_endpoint_url_from_auth_request(type, interface, 
+def get_endpoint_url_from_auth_request(type, interface,
                                       tenant_id, auth_request):
   syslog.debug("Get endpoint from auth_request for {0} {1} tenant {2}".format(
                                                 type, interface, tenant_id))
@@ -286,7 +286,7 @@ def get_endpoint_url_from_auth_request(type, interface,
     if items["type"] == type:
       for endpoints in items["endpoints"]:
         if endpoints["interface"] == interface:
-          syslog.debug("Interface {0} has url {1}".format(interface, 
+          syslog.debug("Interface {0} has url {1}".format(interface,
                                                           endpoints["url"]))
           return endpoints["url"]
 
@@ -346,7 +346,7 @@ def get_instance_uuid_from_dmidecode():
     syslog.error("Cannot get UUID from dmidecode. Make sure it is installed: {0}".format(e))
     errlog.error("Cannot get UUID from dmidecode. Make sure it is installed: {0}".format(e))
     sys.exit(1)
-  uuid = str(re.sub('UUID: ', '', re.search(uuid_pattern, 
+  uuid = str(re.sub('UUID: ', '', re.search(uuid_pattern,
                                             dmidecode_command).group()))
   syslog.debug("UUID found in dmidecode: {0}".format(uuid.lower()))
   return (uuid.lower())
@@ -355,19 +355,19 @@ def get_instance_uuid_from_dmidecode():
 def verify_config(config_data, instance_uuid, keystone_url):
   """Verify's configuration, credentials and connectivity to OpenStack API"""
   ### First try to get an auth_token from keystone
-  try:  
-    auth_request = get_auth_request(config_data["username"], config_data["password"], 
+  try:
+    auth_request = get_auth_request(config_data["username"], config_data["password"],
                                     config_data["tenant_id"], keystone_url)
   except Exception as e:
     errlog.error("Token creation failed: {0}".format(e))
     sys.exit(1)
   print("OK: Token creation successfull.")
-  auth_token = auth_request.headers["X-Subject-Token"]  
+  auth_token = auth_request.headers["X-Subject-Token"]
 
   ## Try to get the networking API from the catalog
   try:
-    network_url = get_endpoint_url_from_auth_request(type="network", interface="public", 
-                                                     tenant_id=config_data["tenant_id"], 
+    network_url = get_endpoint_url_from_auth_request(type="network", interface="public",
+                                                     tenant_id=config_data["tenant_id"],
                                                      auth_request=auth_request)
   except Exception as e:
     errlog.error("Network API URL unavailable: {}".format(e))
@@ -376,7 +376,7 @@ def verify_config(config_data, instance_uuid, keystone_url):
 
   ## Try to get all the ports and their fixed IP for this tenant
   try:
-    ports_data = get_resource(auth_token, network_url, 
+    ports_data = get_resource(auth_token, network_url,
                               "/v2.0/ports?fields=id&fields=device_id&fields=fixed_ips")
   except Exception as e:
     errlog.error("Retreiving port data failed: {0}".format(e))
@@ -397,7 +397,7 @@ def verify_config(config_data, instance_uuid, keystone_url):
   except Exception as e:
     errlog.error("Retreiving floatingips failed: {0}".format(e))
     sys.exit(1)
-  print("OK: Floating IP's found.")  
+  print("OK: Floating IP's found.")
 
   floatingcounter = 0
   for floatingip, internal_ip in config_data["floatingips"].iteritems():
@@ -416,7 +416,7 @@ def verify_config(config_data, instance_uuid, keystone_url):
     if not internal_ip in instance_ports:
       errlog.error("Internal IP {0} not bound to this instance ports.".format(internal_ip))
       sys.exit(1)
-    print(("OK: %s found on instance port %s") % (internal_ip, 
+    print(("OK: %s found on instance port %s") % (internal_ip,
                                                   instance_ports[internal_ip]))
 
 
