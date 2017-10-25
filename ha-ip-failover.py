@@ -89,7 +89,7 @@ def main():
   """ Magic happens here"""
   for arg in sys.argv:
     syslog.debug(arg)
-  instance_uuid = get_instance_uuid_from_dmidecode()
+  instance_uuid = get_instance_uuid()
 
   # load configuration from file
   config_data = load_config(config_file)
@@ -129,8 +129,8 @@ def main():
                                     config_data["tenant_id"], 
                                     keystone_url)
   except Exception as e:
-    syslog.error("""ERROR: token creation failed: ({})""".format(e)) 
-    errlog.error("""ERROR: token creation failed: ({})""".format(e)) 
+    syslog.error("""ERROR: token creation failed: ({0})""".format(e)) 
+    errlog.error("""ERROR: token creation failed: ({0})""".format(e)) 
     sys.exit(1)
   auth_token = auth_request.headers["X-Subject-Token"]
   syslog.debug(auth_token)
@@ -157,7 +157,7 @@ def main():
   ## Loop over the floating IP's in the config, 
   ## disassociate them, check if they are unassigned and then associate them to 
   ## the port for the internal IP.
-  for floatingip, internal_ip in config_data["floatingips"].iteritems(): 
+  for floatingip, internal_ip in config_data["floatingips"].items(): 
     floatingip_uuid = get_floatingip_uuid(floatingip, 
                                           floatingip_data, 
                                           auth_token)["id"]
@@ -336,25 +336,26 @@ def get_auth_request(username, password, tenant_id, auth_url):
                                       auth_request.request.url))
     auth_request.raise_for_status()
 
-def get_instance_uuid_from_dmidecode():
-  """Returns instance UUID from dmidecode, UUID:"""
-  ## case-insensitive regex for UUID's
-  uuid_pattern = '(UUID: )([a-fA-F0-9]{8}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{12})'
+def get_instance_uuid():
+  """Returns instance UUID from sysfs, UUID:"""
+  uuid_path = "/sys/devices/virtual/dmi/id/product_uuid"
   try:
-    dmidecode_command = subprocess.check_output(['dmidecode'])
+    uuid_file = open(uuid_path).read()
+    return uuid_file.lower().rstrip()
   except Exception as e:
-    syslog.error("Cannot get UUID from dmidecode. Make sure it is installed: {0}".format(e))
-    errlog.error("Cannot get UUID from dmidecode. Make sure it is installed: {0}".format(e))
+    syslog.error("Reading UUID file /sys/devices/virtual/dmi/id/product_uuid failed: {0}".format(e))
+    errlog.error("Reading UUID file /sys/devices/virtual/dmi/id/product_uuid failed: {0}".format(e))
     sys.exit(1)
-  uuid = str(re.sub('UUID: ', '', re.search(uuid_pattern, 
-                                            dmidecode_command).group()))
-  syslog.debug("UUID found in dmidecode: {0}".format(uuid.lower()))
-  return (uuid.lower())
-
 
 def verify_config(config_data, instance_uuid, keystone_url):
   """Verify's configuration, credentials and connectivity to OpenStack API"""
   ### First try to get an auth_token from keystone
+  try:
+    instance_uuid = get_instance_uuid()
+  except Exception as e:
+    errlog.error("Unable to retreive instance UUID: {0}".format(e))
+  print("OK: Instance UUID found: {0}".format(instance_uuid))
+
   try:  
     auth_request = get_auth_request(config_data["username"], config_data["password"], 
                                     config_data["tenant_id"], keystone_url)
@@ -370,7 +371,7 @@ def verify_config(config_data, instance_uuid, keystone_url):
                                                      tenant_id=config_data["tenant_id"], 
                                                      auth_request=auth_request)
   except Exception as e:
-    errlog.error("Network API URL unavailable: {}".format(e))
+    errlog.error("Network API URL unavailable: {0}".format(e))
     sys.exit(1)
   print("OK: Network API URL found.")
 
@@ -400,11 +401,11 @@ def verify_config(config_data, instance_uuid, keystone_url):
   print("OK: Floating IP's found.")  
 
   floatingcounter = 0
-  for floatingip, internal_ip in config_data["floatingips"].iteritems():
+  for floatingip, internal_ip in config_data["floatingips"].items():
     for floatingips in floatingip_data["floatingips"]:
       if floatingips["floating_ip_address"] == floatingip:
         floatingcounter += 1
-        print("OK: Floating IP %s found in this tenant") % floatingip
+        print("OK: Floating IP {0} found in this tenant".format(floatingip))
 
   if len(config_data["floatingips"]) == floatingcounter:
     print("OK: All configured floating IP's found in this tenant")
@@ -412,11 +413,11 @@ def verify_config(config_data, instance_uuid, keystone_url):
     errlog.error("Floating IP's from configfile not found in this tenant.")
     sys.exit(1)
 
-  for floatingip, internal_ip in config_data["floatingips"].iteritems():
+  for floatingip, internal_ip in config_data["floatingips"].items():
     if not internal_ip in instance_ports:
       errlog.error("Internal IP {0} not bound to this instance ports.".format(internal_ip))
       sys.exit(1)
-    print(("OK: %s found on instance port %s") % (internal_ip, 
+    print("OK: {0} found on instance port {1}".format(internal_ip, 
                                                   instance_ports[internal_ip]))
 
 
