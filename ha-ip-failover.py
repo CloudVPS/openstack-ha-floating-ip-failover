@@ -1,6 +1,6 @@
 #!/usr/bin/env python2
-# Copyright (C) 2017 Remy van Elst. 
-# Author: Remy van Elst, https://raymii.org
+# Copyright (C) 2017 Cloudvps.nl
+# Author: Remy van Elst, 
 # 
 # This program is free software; you can redistribute it and/or modify it 
 # under the terms of the GNU General Public License as published by the 

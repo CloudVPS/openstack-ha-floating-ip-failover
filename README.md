@@ -1,7 +1,7 @@
 
 **Important**
 
-Unsupported, untested, beta version for Ubuntu 16.04.
+Beta version for Ubuntu 16.04.
 
 
 This script allows for keepalived to attach an OpenStack floating IP to an instance during a state transition. This way, a floating IP can be made high-available between instances.
@@ -38,7 +38,7 @@ Create the folder:
 
 Place the script inside folder:
 
-	wget -O /etc/cloudvps/ha-ip-failover.py https://raw.githubusercontent.com/RaymiiOrg/openstack-ha-floating-ip-failover/master/ha-ip-failover.py
+	wget -O /etc/cloudvps/ha-ip-failover.py https://raw.githubusercontent.com/CloudVPS/openstack-ha-floating-ip-failover/master/ha-ip-failover.py
 
 Make it executable:
 
@@ -46,7 +46,7 @@ Make it executable:
 
 Place the config file:
 
-	wget -O /etc/cloudvps/ha-ip-config.json https://raw.githubusercontent.com/RaymiiOrg/openstack-ha-floating-ip-failover/master/ha-ip-config.json.example
+	wget -O /etc/cloudvps/ha-ip-config.json https://raw.githubusercontent.com/CloudVPS/openstack-ha-floating-ip-failover/master/ha-ip-config.json.example
 
 Change the configuration and fill in your own values:
 
