@@ -58,7 +58,7 @@ Change the configuration and fill in your own values:
 	    "83.96.236.198": "192.168.0.7",
 	    "83.96.236.143": "192.168.0.7",
 	    "83.96.236.84": "192.168.0.6"
-	  } 
+	  }
 	}
 
 
@@ -99,7 +99,7 @@ If the config file is not valid JSON:
 	[cloudvps] 2017-10-02 16:10:04,951 [ERROR]  Reading config file failed: Expecting , delimiter: line 7 column 17 (char 215)
 
 
-### Keepalived 
+### Keepalived
 
 Keepalived is the software that handles the high availability using the VRRP protocol. Normally you can use it for high availability IP's between nodes in the same network. In our case it is used to attach a floating IP to an instance during a state transition. The `virtual_ipaddress` section therefore is not required.
 
@@ -110,7 +110,7 @@ Install Keepalived:
 
 Place the config file on both servers. Make sure prority is different, and fill in a password.
 
-	vim /etc/keepalived/keepalived.conf 
+	vim /etc/keepalived/keepalived.conf
 
 Server 1:
 
@@ -122,7 +122,7 @@ Server 1:
 	    advert_int 1
 	    authentication {
 	        auth_type PASS
-	        auth_pass 
+	        auth_pass
 	    }
 	    notify /etc/cloudvps/ha-ip-failover.py
 	}
@@ -137,7 +137,7 @@ Server 2:
 	    advert_int 1
 	    authentication {
 	        auth_type PASS
-	        auth_pass 
+	        auth_pass
 	    }
 	    notify /etc/cloudvps/ha-ip-failover.py
 	}
