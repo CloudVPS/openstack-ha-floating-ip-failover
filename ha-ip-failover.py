@@ -162,19 +162,52 @@ def main():
                                           floatingip_data, 
                                           auth_token)["id"]
     internal_port_uuid = instance_ports[internal_ip]
-    deassign_floatingip(floatingip_uuid, network_url, auth_token)
-    deassign_floatingip(floatingip_uuid, network_url, auth_token)
+    # openstack maps a floating IP as the outgoing ip for an instance
+    # when a floating ip is deassigned, the outgoing ip changes to
+    # the router ip. Which results in timeouts during these requests.
+    # therefore we retry and are extra vigilant.
+    try:
+      deassign_floatingip(floatingip_uuid, network_url, auth_token) 
+    except Exception as e:
+      syslog.debug("Deassign floatingip {0} failed: {1}. Retrying".format(floatingip_uuid, e))
+      try:
+        deassign_floatingip(floatingip_uuid, network_url, auth_token) 
+      except Exception as e:
+        syslog.debug("Deassign floatingip {0} failed again: {1}.".format(floatingip_uuid, e))
+    # do the deassign again just to be sure. When we're here in the code it means there is a
+    # failover so make sure we try extra hard.
+    try:
+      deassign_floatingip(floatingip_uuid, network_url, auth_token) 
+    except Exception as e:
+      syslog.debug("Deassign floatingip {0} failed: {1}. Retrying".format(floatingip_uuid, e))
+      try:
+        deassign_floatingip(floatingip_uuid, network_url, auth_token) 
+      except Exception as e:
+        syslog.debug("Deassign floatingip {0} failed again: {1}.".format(floatingip_uuid, e))
 
-    assign_floatingip(floatingip_uuid, internal_port_uuid, 
+    # same goes here, network and ip assignment changes, therefore retry. 
+    try:
+      assign_floatingip(floatingip_uuid, internal_port_uuid, 
                       network_url, auth_token)
-
+    except Exception as e:
+      syslog.debug("Assign floatingip {0} to port {1} failed, retrying: {2}.".format(floatingip_uuid, port_uuid, e))
+      try:
+        assign_floatingip(floatingip_uuid, internal_port_uuid, 
+                        network_url, auth_token)
+      except Exception as e:
+        syslog.debug("Assign floatingip {0} to port {1} failed again: {2}.".format(floatingip_uuid, port_uuid, e))
 
 
 
 def assign_floatingip(floatingip_uuid, port_uuid, network_url, auth_token):
   """Assigns floating IP to port"""
-  syslog.debug("Assign floating IP {0} to port {1}".format(floatingip_uuid,
-                                                           port_uuid))
+  if port_uuid:
+    assign_type = "Assign"
+  else:
+    assign_type = "Deassign"
+  syslog.debug("{0} floating IP {1} to port {2}".format(assign_type,
+                                                        floatingip_uuid,
+                                                        port_uuid))
   headers = {'X-Auth-Token': auth_token,
             'Content-Type': "application/json",
             'User-Agent': 'python-neutronclient'}
@@ -183,39 +216,41 @@ def assign_floatingip(floatingip_uuid, port_uuid, network_url, auth_token):
   try:
     floatingip_request = requests.put(floatingip_url, 
                                       json=floatingip_request_data, 
-                                      headers=headers, timeout=15)
+                                      headers=headers, timeout=5)
+    errlog.error("OK: Request {2} floating IP {0} to port {1}".format(floatingip_uuid, port_uuid, assign_type))
+  # during testing there were a lot of timeouts. Therefore we do a built in retry
   except Exception as e:
-    syslog.error("Request: {0}".format(e))
-    errlog.error("Request: {0}".format(e))
+    syslog.error("Request {2} floating IP {0} to port {1}: {2}".format(floatingip_uuid, port_uuid, e, assign_type))
+    errlog.error("Request {2} floating IP {0} to port {1}: {2}".format(floatingip_uuid, port_uuid, e, assign_type))
+    time.sleep(5)
     try:
       floatingip_request = requests.put(floatingip_url, 
                                       json=floatingip_request_data, 
-                                      headers=headers, timeout=15)
+                                      headers=headers, timeout=5)
+      errlog.error("OK: Request retry assign floating IP {0} to port {1}".format(floatingip_uuid, port_uuid))
     except Exception as e2:
-      syslog.error("Request retry: {0}".format(e))
-      errlog.error("Request retry: {0}".format(e))
-      sys.exit(1)  
+      syslog.error("Request retry assign floating IP {0} to port {1}: {2}".format(floatingip_uuid, port_uuid, e))
+      errlog.error("Request retry assign floating IP {0} to port {1}: {2}".format(floatingip_uuid, port_uuid, e))
 
   if floatingip_request.ok:
-    syslog.debug("Request output: {0} {1} {2} {3}".format(
+    syslog.debug("Request assign floating IP to port output: {0} {1} {2} {3}".format(
                                             floatingip_request.status_code,
                                             floatingip_request.request.method,
                                             floatingip_request.request.url,
                                             floatingip_request.request.body))
     return(floatingip_request.json())
   else:
-    syslog.error("Request output: {0} {1} {2} {3}".format(
+    syslog.error("Request assign floating IP to port output: {0} {1} {2} {3}".format(
                               floatingip_request.status_code,
                               floatingip_request.request.method,
                               floatingip_request.request.url,
                               floatingip_request.request.body))
-    errlog.error("Request output: {0} {1} {2} {3}".format(
+    errlog.error("Request assign floating IP to port output: {0} {1} {2} {3}".format(
                               floatingip_request.status_code,
                               floatingip_request.request.method,
                               floatingip_request.request.url,
                               floatingip_request.request.body))
     floatingip_request.raise_for_status()
-    sys.exit(1)
 
 
 def deassign_floatingip(floatingip_uuid, network_url, auth_token):
@@ -252,25 +287,25 @@ def get_resource(auth_token, endpoint_url, resource_url):
               'User-Agent': 'python-openstackclient'}
   resource_url = endpoint_url + resource_url
   try:
-    resource_request = requests.get(resource_url, headers=headers, timeout=15)
+    resource_request = requests.get(resource_url, headers=headers, timeout=5)
   except Exception as e:
-    syslog.error("Request: {0}".format(e))
-    errlog.error("Request: {0}".format(e))
+    syslog.error("Request get_resource: {0}".format(e))
+    errlog.error("Request get_resource: {0}".format(e))
     sys.exit(1)
   if resource_request.ok:
-    syslog.debug("Request output: {0} {1} {2} {3}".format(
+    syslog.debug("Request get_resource output: {0} {1} {2} {3}".format(
                                             resource_request.status_code,
                                             resource_request.request.method,
                                             resource_request.request.url,
                                             resource_request.request.body))
     return(resource_request.json())
   else: 
-    syslog.error("Request output: {0} {1} {2} {3}".format(
+    syslog.error("Request get_resource output: {0} {1} {2} {3}".format(
                                             resource_request.status_code,
                                             resource_request.request.method,
                                             resource_request.request.url,
                                             resource_request.request.body))
-    errlog.error("Request output: {0} {1} {2} {3}".format(
+    errlog.error("Request get_resource output: {0} {1} {2} {3}".format(
                                             resource_request.status_code,
                                             resource_request.request.method,
                                             resource_request.request.url,
@@ -317,20 +352,20 @@ def get_auth_request(username, password, tenant_id, auth_url):
                     }
                   }
   try:
-    auth_request = requests.post(auth_url, json=auth_post_data, timeout=15)
+    auth_request = requests.post(auth_url, json=auth_post_data, timeout=5)
   except Exception as e:
-    syslog.error("Request: {0}".format(e))
-    errlog.error("Request: {0}".format(e))
+    syslog.error("Request get_auth_request : {0}".format(e))
+    errlog.error("Request get_auth_request : {0}".format(e))
     sys.exit(1)
   if auth_request.ok:
     return(auth_request)
   else:
     # don't log body, contains password
-    syslog.error("Request output: {0} {1} {2}".format(
+    syslog.error("Request get_auth_request  output: {0} {1} {2}".format(
                                       auth_request.status_code,
                                       auth_request.request.method,
                                       auth_request.request.url))
-    errlog.error("Request output: {0} {1} {2}".format(
+    errlog.error("Request  get_auth_request output: {0} {1} {2}".format(
                                       auth_request.status_code,
                                       auth_request.request.method,
                                       auth_request.request.url))
