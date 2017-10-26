@@ -89,7 +89,7 @@ def main():
   """ Magic happens here"""
   for arg in sys.argv:
     syslog.debug(arg)
-  instance_uuid = get_instance_uuid_from_dmidecode()
+  instance_uuid = get_instance_uuid()
 
   # load configuration from file
   config_data = load_config(config_file)
@@ -129,8 +129,8 @@ def main():
                                     config_data["tenant_id"],
                                     keystone_url)
   except Exception as e:
-    syslog.error("""ERROR: token creation failed: ({})""".format(e))
-    errlog.error("""ERROR: token creation failed: ({})""".format(e))
+    syslog.error("""ERROR: token creation failed: ({0})""".format(e)) 
+    errlog.error("""ERROR: token creation failed: ({0})""".format(e)) 
     sys.exit(1)
   auth_token = auth_request.headers["X-Subject-Token"]
   syslog.debug(auth_token)
@@ -157,65 +157,100 @@ def main():
   ## Loop over the floating IP's in the config,
   ## disassociate them, check if they are unassigned and then associate them to
   ## the port for the internal IP.
-  for floatingip, internal_ip in config_data["floatingips"].iteritems():
-    floatingip_uuid = get_floatingip_uuid(floatingip,
-                                          floatingip_data,
+  for floatingip, internal_ip in config_data["floatingips"].items(): 
+    floatingip_uuid = get_floatingip_uuid(floatingip, 
+                                          floatingip_data, 
                                           auth_token)["id"]
     internal_port_uuid = instance_ports[internal_ip]
-    deassign_floatingip(floatingip_uuid, network_url, auth_token)
-    deassign_floatingip(floatingip_uuid, network_url, auth_token)
+    # openstack maps a floating IP as the outgoing ip for an instance
+    # when a floating ip is deassigned, the outgoing ip changes to
+    # the router ip. Which results in timeouts during these requests.
+    # therefore we retry and are extra vigilant.
+    try:
+      deassign_floatingip(floatingip_uuid, network_url, auth_token) 
+    except Exception as e:
+      syslog.debug("Deassign floatingip {0} failed: {1}. Retrying".format(floatingip_uuid, e))
+      try:
+        deassign_floatingip(floatingip_uuid, network_url, auth_token) 
+      except Exception as e:
+        syslog.debug("Deassign floatingip {0} failed again: {1}.".format(floatingip_uuid, e))
+    # do the deassign again just to be sure. When we're here in the code it means there is a
+    # failover so make sure we try extra hard.
+    try:
+      deassign_floatingip(floatingip_uuid, network_url, auth_token) 
+    except Exception as e:
+      syslog.debug("Deassign floatingip {0} failed: {1}. Retrying".format(floatingip_uuid, e))
+      try:
+        deassign_floatingip(floatingip_uuid, network_url, auth_token) 
+      except Exception as e:
+        syslog.debug("Deassign floatingip {0} failed again: {1}.".format(floatingip_uuid, e))
 
-    assign_floatingip(floatingip_uuid, internal_port_uuid,
+    # same goes here, network and ip assignment changes, therefore retry. 
+    try:
+      assign_floatingip(floatingip_uuid, internal_port_uuid, 
                       network_url, auth_token)
-
+    except Exception as e:
+      syslog.debug("Assign floatingip {0} to port {1} failed, retrying: {2}.".format(floatingip_uuid, port_uuid, e))
+      try:
+        assign_floatingip(floatingip_uuid, internal_port_uuid, 
+                        network_url, auth_token)
+      except Exception as e:
+        syslog.debug("Assign floatingip {0} to port {1} failed again: {2}.".format(floatingip_uuid, port_uuid, e))
 
 
 
 def assign_floatingip(floatingip_uuid, port_uuid, network_url, auth_token):
   """Assigns floating IP to port"""
-  syslog.debug("Assign floating IP {0} to port {1}".format(floatingip_uuid,
-                                                           port_uuid))
+  if port_uuid:
+    assign_type = "Assign"
+  else:
+    assign_type = "Deassign"
+  syslog.debug("{0} floating IP {1} to port {2}".format(assign_type,
+                                                        floatingip_uuid,
+                                                        port_uuid))
   headers = {'X-Auth-Token': auth_token,
             'Content-Type': "application/json",
             'User-Agent': 'python-neutronclient'}
   floatingip_url = network_url + "v2.0/floatingips/" + floatingip_uuid
   floatingip_request_data = {"floatingip": {"port_id": port_uuid }}
   try:
-    floatingip_request = requests.put(floatingip_url,
-                                      json=floatingip_request_data,
-                                      headers=headers, timeout=15)
+    floatingip_request = requests.put(floatingip_url, 
+                                      json=floatingip_request_data, 
+                                      headers=headers, timeout=5)
+    errlog.error("OK: Request {2} floating IP {0} to port {1}".format(floatingip_uuid, port_uuid, assign_type))
+  # during testing there were a lot of timeouts. Therefore we do a built in retry
   except Exception as e:
-    syslog.error("Request: {0}".format(e))
-    errlog.error("Request: {0}".format(e))
+    syslog.error("Request {2} floating IP {0} to port {1}: {2}".format(floatingip_uuid, port_uuid, e, assign_type))
+    errlog.error("Request {2} floating IP {0} to port {1}: {2}".format(floatingip_uuid, port_uuid, e, assign_type))
+    time.sleep(5)
     try:
-      floatingip_request = requests.put(floatingip_url,
-                                      json=floatingip_request_data,
-                                      headers=headers, timeout=15)
+      floatingip_request = requests.put(floatingip_url, 
+                                      json=floatingip_request_data, 
+                                      headers=headers, timeout=5)
+      errlog.error("OK: Request retry assign floating IP {0} to port {1}".format(floatingip_uuid, port_uuid))
     except Exception as e2:
-      syslog.error("Request retry: {0}".format(e))
-      errlog.error("Request retry: {0}".format(e))
-      sys.exit(1)
+      syslog.error("Request retry assign floating IP {0} to port {1}: {2}".format(floatingip_uuid, port_uuid, e))
+      errlog.error("Request retry assign floating IP {0} to port {1}: {2}".format(floatingip_uuid, port_uuid, e))
 
   if floatingip_request.ok:
-    syslog.debug("Request output: {0} {1} {2} {3}".format(
+    syslog.debug("Request assign floating IP to port output: {0} {1} {2} {3}".format(
                                             floatingip_request.status_code,
                                             floatingip_request.request.method,
                                             floatingip_request.request.url,
                                             floatingip_request.request.body))
     return(floatingip_request.json())
   else:
-    syslog.error("Request output: {0} {1} {2} {3}".format(
+    syslog.error("Request assign floating IP to port output: {0} {1} {2} {3}".format(
                               floatingip_request.status_code,
                               floatingip_request.request.method,
                               floatingip_request.request.url,
                               floatingip_request.request.body))
-    errlog.error("Request output: {0} {1} {2} {3}".format(
+    errlog.error("Request assign floating IP to port output: {0} {1} {2} {3}".format(
                               floatingip_request.status_code,
                               floatingip_request.request.method,
                               floatingip_request.request.url,
                               floatingip_request.request.body))
     floatingip_request.raise_for_status()
-    sys.exit(1)
 
 
 def deassign_floatingip(floatingip_uuid, network_url, auth_token):
@@ -252,25 +287,25 @@ def get_resource(auth_token, endpoint_url, resource_url):
               'User-Agent': 'python-openstackclient'}
   resource_url = endpoint_url + resource_url
   try:
-    resource_request = requests.get(resource_url, headers=headers, timeout=15)
+    resource_request = requests.get(resource_url, headers=headers, timeout=5)
   except Exception as e:
-    syslog.error("Request: {0}".format(e))
-    errlog.error("Request: {0}".format(e))
+    syslog.error("Request get_resource: {0}".format(e))
+    errlog.error("Request get_resource: {0}".format(e))
     sys.exit(1)
   if resource_request.ok:
-    syslog.debug("Request output: {0} {1} {2} {3}".format(
+    syslog.debug("Request get_resource output: {0} {1} {2} {3}".format(
                                             resource_request.status_code,
                                             resource_request.request.method,
                                             resource_request.request.url,
                                             resource_request.request.body))
     return(resource_request.json())
-  else:
-    syslog.error("Request output: {0} {1} {2} {3}".format(
+  else: 
+    syslog.error("Request get_resource output: {0} {1} {2} {3}".format(
                                             resource_request.status_code,
                                             resource_request.request.method,
                                             resource_request.request.url,
                                             resource_request.request.body))
-    errlog.error("Request output: {0} {1} {2} {3}".format(
+    errlog.error("Request get_resource output: {0} {1} {2} {3}".format(
                                             resource_request.status_code,
                                             resource_request.request.method,
                                             resource_request.request.url,
@@ -317,46 +352,47 @@ def get_auth_request(username, password, tenant_id, auth_url):
                     }
                   }
   try:
-    auth_request = requests.post(auth_url, json=auth_post_data, timeout=15)
+    auth_request = requests.post(auth_url, json=auth_post_data, timeout=5)
   except Exception as e:
-    syslog.error("Request: {0}".format(e))
-    errlog.error("Request: {0}".format(e))
+    syslog.error("Request get_auth_request : {0}".format(e))
+    errlog.error("Request get_auth_request : {0}".format(e))
     sys.exit(1)
   if auth_request.ok:
     return(auth_request)
   else:
     # don't log body, contains password
-    syslog.error("Request output: {0} {1} {2}".format(
+    syslog.error("Request get_auth_request  output: {0} {1} {2}".format(
                                       auth_request.status_code,
                                       auth_request.request.method,
                                       auth_request.request.url))
-    errlog.error("Request output: {0} {1} {2}".format(
+    errlog.error("Request  get_auth_request output: {0} {1} {2}".format(
                                       auth_request.status_code,
                                       auth_request.request.method,
                                       auth_request.request.url))
     auth_request.raise_for_status()
 
-def get_instance_uuid_from_dmidecode():
-  """Returns instance UUID from dmidecode, UUID:"""
-  ## case-insensitive regex for UUID's
-  uuid_pattern = '(UUID: )([a-fA-F0-9]{8}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{12})'
+def get_instance_uuid():
+  """Returns instance UUID from sysfs, UUID:"""
+  uuid_path = "/sys/devices/virtual/dmi/id/product_uuid"
   try:
-    dmidecode_command = subprocess.check_output(['dmidecode'])
+    uuid_file = open(uuid_path).read()
+    return uuid_file.lower().rstrip()
   except Exception as e:
-    syslog.error("Cannot get UUID from dmidecode. Make sure it is installed: {0}".format(e))
-    errlog.error("Cannot get UUID from dmidecode. Make sure it is installed: {0}".format(e))
+    syslog.error("Reading UUID file /sys/devices/virtual/dmi/id/product_uuid failed: {0}".format(e))
+    errlog.error("Reading UUID file /sys/devices/virtual/dmi/id/product_uuid failed: {0}".format(e))
     sys.exit(1)
-  uuid = str(re.sub('UUID: ', '', re.search(uuid_pattern,
-                                            dmidecode_command).group()))
-  syslog.debug("UUID found in dmidecode: {0}".format(uuid.lower()))
-  return (uuid.lower())
-
 
 def verify_config(config_data, instance_uuid, keystone_url):
   """Verify's configuration, credentials and connectivity to OpenStack API"""
   ### First try to get an auth_token from keystone
   try:
-    auth_request = get_auth_request(config_data["username"], config_data["password"],
+    instance_uuid = get_instance_uuid()
+  except Exception as e:
+    errlog.error("Unable to retreive instance UUID: {0}".format(e))
+  print("OK: Instance UUID found: {0}".format(instance_uuid))
+
+  try:  
+    auth_request = get_auth_request(config_data["username"], config_data["password"], 
                                     config_data["tenant_id"], keystone_url)
   except Exception as e:
     errlog.error("Token creation failed: {0}".format(e))
@@ -370,7 +406,7 @@ def verify_config(config_data, instance_uuid, keystone_url):
                                                      tenant_id=config_data["tenant_id"],
                                                      auth_request=auth_request)
   except Exception as e:
-    errlog.error("Network API URL unavailable: {}".format(e))
+    errlog.error("Network API URL unavailable: {0}".format(e))
     sys.exit(1)
   print("OK: Network API URL found.")
 
@@ -400,11 +436,11 @@ def verify_config(config_data, instance_uuid, keystone_url):
   print("OK: Floating IP's found.")
 
   floatingcounter = 0
-  for floatingip, internal_ip in config_data["floatingips"].iteritems():
+  for floatingip, internal_ip in config_data["floatingips"].items():
     for floatingips in floatingip_data["floatingips"]:
       if floatingips["floating_ip_address"] == floatingip:
         floatingcounter += 1
-        print("OK: Floating IP %s found in this tenant") % floatingip
+        print("OK: Floating IP {0} found in this tenant".format(floatingip))
 
   if len(config_data["floatingips"]) == floatingcounter:
     print("OK: All configured floating IP's found in this tenant")
@@ -412,11 +448,11 @@ def verify_config(config_data, instance_uuid, keystone_url):
     errlog.error("Floating IP's from configfile not found in this tenant.")
     sys.exit(1)
 
-  for floatingip, internal_ip in config_data["floatingips"].iteritems():
+  for floatingip, internal_ip in config_data["floatingips"].items():
     if not internal_ip in instance_ports:
       errlog.error("Internal IP {0} not bound to this instance ports.".format(internal_ip))
       sys.exit(1)
-    print(("OK: %s found on instance port %s") % (internal_ip,
+    print("OK: {0} found on instance port {1}".format(internal_ip, 
                                                   instance_ports[internal_ip]))
 
 
