@@ -36,9 +36,13 @@ except ImportError as e:
   sys.exit(1)
 
 ## commandline parameters
-## keepalived $1 == "INSTANCE or GROUP"
-## keepalived $2 == "NAME" of instance or group
-## keepalived $3 == "MASTER, BACKUP, FAULT", target state of transition
+## https://github.com/acassen/keepalived/blob/master/doc/man/man5/keepalived.conf.5#L375
+## $1 = "GROUP"|"INSTANCE"
+## $2 = name of the group or instance
+## $3 = target state of transition (stop only applies to instances)
+##     ("MASTER"|"BACKUP"|"FAULT"|"STOP")
+## $4 = priority value
+
 
 ## OpenStack 2.0 keystone (using OpenStack 1 auth credentials because of k2k)
 keystone_url = "https://identity.openstack.cloudvps.com/v3/auth/tokens"
@@ -53,9 +57,13 @@ def load_config(config_file):
     "password": "hunter2",
     "tenant_id": "1234abcd...",
     "floatingips": {
-      "83.96.236.198": "192.168.0.7",
-      "83.96.236.143": "192.168.0.7",
-      "83.96.236.84": "192.168.0.6"
+      "VRRP_GROUP_1": {
+        "83.96.236.198": "192.168.0.7",
+        "83.96.236.143": "192.168.0.7"
+      },
+      "VRRP_GROUP_2": {
+        "83.96.236.84": "192.168.0.6"
+      }
     }
   }
   """
@@ -118,9 +126,24 @@ def main():
   # since the neutron api doesn't allow to disassociate a floating ip
   # from a specific port. Just fire and forget disassociate.
   if keepalived_state != "MASTER":
-    print("Not transitioning to master, no action.")
+    errlog.error("Not transitioning to master, no action.")
     syslog.debug("Not transitioning to master, no action.")
     usage()
+
+  # check if the vrrp group or instance name is defined in the config
+  # and if it contains IP addresses
+  if keepalived_name in config_data["floatingips"]:
+    if len(config_data["floatingips"][keepalived_name]) >= 1:
+      syslog.debug("VRRP group {0} found in ha-ip-config.".format(keepalived_name))
+    else:
+      errlog.error("VRRP group {0} empty.".format(keepalived_name))
+      syslog.debug("VRRP group {0} empty.".format(keepalived_name))
+      usage()
+  else:
+    errlog.error("VRRP group {0} not found in ha-ip-config.".format(keepalived_name))
+    syslog.debug("VRRP group {0} not found in ha-ip-config.".format(keepalived_name))
+    usage()
+
 
   ## Get the auth token and service catalog from keystone
   try:
@@ -132,6 +155,7 @@ def main():
     syslog.error("""ERROR: token creation failed: ({0})""".format(e)) 
     errlog.error("""ERROR: token creation failed: ({0})""".format(e)) 
     sys.exit(1)
+
   auth_token = auth_request.headers["X-Subject-Token"]
   syslog.debug(auth_token)
 
@@ -157,7 +181,7 @@ def main():
   ## Loop over the floating IP's in the config,
   ## disassociate them, check if they are unassigned and then associate them to
   ## the port for the internal IP.
-  for floatingip, internal_ip in config_data["floatingips"].items(): 
+  for floatingip, internal_ip in config_data["floatingips"][keepalived_name].items(): 
     floatingip_uuid = get_floatingip_uuid(floatingip, 
                                           floatingip_data, 
                                           auth_token)["id"]
@@ -435,25 +459,33 @@ def verify_config(config_data, instance_uuid, keystone_url):
     sys.exit(1)
   print("OK: Floating IP's found.")
 
-  floatingcounter = 0
-  for floatingip, internal_ip in config_data["floatingips"].items():
-    for floatingips in floatingip_data["floatingips"]:
-      if floatingips["floating_ip_address"] == floatingip:
-        floatingcounter += 1
-        print("OK: Floating IP {0} found in this tenant".format(floatingip))
+  floatingcounter = {}
+  for vrrp_group in config_data["floatingips"]:
+    floatingcounter[vrrp_group] = 0
+    for floatingip, internal_ip in config_data["floatingips"][vrrp_group].items():
+      for floatingips in floatingip_data["floatingips"]:
+        if floatingips["floating_ip_address"] == floatingip:
+          floatingcounter[vrrp_group] += 1
+          print("OK: Floating IP {0}, VRRP group {1} found in this tenant".format(
+                                                                floatingip, vrrp_group))
 
-  if len(config_data["floatingips"]) == floatingcounter:
-    print("OK: All configured floating IP's found in this tenant")
-  else:
-    errlog.error("Floating IP's from configfile not found in this tenant.")
-    sys.exit(1)
-
-  for floatingip, internal_ip in config_data["floatingips"].items():
-    if not internal_ip in instance_ports:
-      errlog.error("Internal IP {0} not bound to this instance ports.".format(internal_ip))
+  for vrrp_group in config_data["floatingips"]:
+    if len(config_data["floatingips"][vrrp_group]) == floatingcounter[vrrp_group]:
+      print("OK: All configured floating IP's for VRRP group {0} found in this tenant".format(
+                                                                              vrrp_group))
+    else:
+      errlog.error("Floating IP's for VRRP group {0} from configfile not found in this tenant.".format(
+                                                                                vrrp_group))
       sys.exit(1)
-    print("OK: {0} found on instance port {1}".format(internal_ip, 
-                                                  instance_ports[internal_ip]))
+
+  for vrrp_group in config_data["floatingips"]:
+    for floatingip, internal_ip in config_data["floatingips"][vrrp_group].items():
+      if not internal_ip in instance_ports:
+        errlog.error("Internal IP {0} for VRRP group {1} not bound to this instance ports.".format(
+                                                                            internal_ip, vrrp_group))
+        sys.exit(1)
+      print("OK: {0} found on instance port {1}".format(internal_ip, 
+                                                    instance_ports[internal_ip]))
 
 
   sys.exit(0)
