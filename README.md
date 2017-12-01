@@ -55,14 +55,20 @@ Change the configuration and fill in your own values:
 	  "password": "hunter2",
 	  "tenant_id": "1234abcd...",
 	  "floatingips": {
-	    "83.96.236.198": "192.168.0.7",
-	    "83.96.236.143": "192.168.0.7",
-	    "83.96.236.84": "192.168.0.6"
+	  	"vrrp_group_1": {
+		    "83.96.236.198": "192.168.0.7",
+		    "83.96.236.143": "192.168.0.7"
+		},
+		"vrrp_group_2": {
+	    	"83.96.236.84": "192.168.0.6"
+	    }
 	  }
 	}
 
 
 The `floatingips` section defines the floating IP as the key, and the internal IP as the value. The internal IP must be an IP that is attached to the instance. If instance 1 has IP `192.168.0.7` and instance 2 has IP `192.168.0.8`, you will end up with two different configuration files where the internal IP's are different.
+
+The VRRP group / instance names must be the same as in the keepalived config. Each group / instance can have multiple IP's. Do not use the same floating IP in multiple groups.
 
 Multiple floating IP's are accepted, both on the same interface as on different interfaces.
 
@@ -74,16 +80,18 @@ After you've configured the script and installed the required software, you must
 
 Output:
 
+	OK: Instance UUID found: 159dc1fe-6951-473d-b656-d8887fdf83f8
 	OK: Token creation successfull.
 	OK: Network API URL found.
 	OK: Port data found.
 	OK: Port data for this instance found.
 	OK: Floating IP's found.
-	OK: Floating IP 83.96.236.251 found in this tenant
-	OK: Floating IP 83.96.236.250 found in this tenant
-	OK: All configured floating IP's found in this tenant
-	OK: 192.168.0.4 found on instance port d95e3657-97a8-41ce-8d99-a082cb9a99cd
-	OK: 192.168.0.4 found on instance port d95e3657-97a8-41ce-8d99-a082cb9a99cd
+	OK: Floating IP 83.96.236.251, VRRP group vi_2 found in this tenant
+	OK: Floating IP 83.96.236.250, VRRP group vi_1 found in this tenant
+	OK: All configured floating IP's for VRRP group vi_2 found in this tenant
+	OK: All configured floating IP's for VRRP group vi_1 found in this tenant
+	OK: 192.168.0.5 found on instance port f05cded1-8b57-4bda-b6cb-81c1d1908520
+	OK: 192.168.0.5 found on instance port f05cded1-8b57-4bda-b6cb-81c1d1908520
 
 If there are errors, they are reported:
 
@@ -114,7 +122,7 @@ Place the config file on both servers. Make sure prority is different, and fill 
 
 Server 1:
 
-	vrrp_instance VI_1 {
+	vrrp_instance vrrp_group_1 {
 	    state MASTER
 	    interface eth0
 	    virtual_router_id 51
@@ -129,7 +137,7 @@ Server 1:
 
 Server 2:
 
-	vrrp_instance VI_1 {
+	vrrp_instance vrrp_group_1 {
 	    state MASTER
 	    interface eth0
 	    virtual_router_id 51
