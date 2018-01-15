@@ -124,7 +124,7 @@ Server 1:
 
 	vrrp_instance vrrp_group_1 {
 	    state MASTER
-	    interface eth0
+	    interface eth1
 	    virtual_router_id 51
 	    priority 150
 	    advert_int 1
@@ -139,7 +139,7 @@ Server 2:
 
 	vrrp_instance vrrp_group_1 {
 	    state MASTER
-	    interface eth0
+	    interface eth1
 	    virtual_router_id 51
 	    priority 100
 	    advert_int 1
@@ -152,3 +152,5 @@ Server 2:
 
 
 This configuration has the IP on Server 1 and will only failover to server 2 when server 1 is offline.
+
+Do note that this keepalived config uses an internal network (eth1) for the VRRP traffic.
