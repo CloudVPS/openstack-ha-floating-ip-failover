@@ -1,6 +1,10 @@
 
 **Important**
 
+This method is obsolete. Keepalived is now fully supported.
+
+
+
 Beta version for Ubuntu 16.04.
 
 
